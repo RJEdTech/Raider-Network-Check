@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RJ Network Check</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1c2430;--mute:#5d6878;--line:#dde2e9;--accent:#8a1c2b;--bad:#b42318;--warn:#b54708;--ok:#067647;--chip:#eef1f5}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#12161c;--card:#1b2129;--ink:#e6eaf0;--mute:#9aa5b4;--line:#2d3642;--accent:#e06c7c;--bad:#f97066;--warn:#fdb022;--ok:#47cd89;--chip:#252d38}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1100px;margin:0 auto;padding:20px 16px 60px}
+h1{margin:0 0 4px;font-size:24px}
+h2{font-size:17px;margin:0 0 10px}
+.sub{color:var(--mute);margin:0 0 18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
+ol{margin:0;padding-left:22px}
+ol li{margin:6px 0}
+code{background:var(--chip);padding:1px 6px;border-radius:4px;font-size:13px}
+button{font:inherit;border:1px solid var(--line);background:var(--chip);color:var(--ink);border-radius:6px;padding:4px 10px;cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+#drop{border:2px dashed var(--line);border-radius:10px;padding:28px;text-align:center;color:var(--mute);cursor:pointer}
+#drop.over{border-color:var(--accent);color:var(--ink)}
+.stats{display:flex;flex-wrap:wrap;gap:10px;margin:10px 0}
+.stat{background:var(--chip);border-radius:8px;padding:8px 12px;min-width:120px}
+.stat b{display:block;font-size:20px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--mute);font-weight:600}
+td.url{word-break:break-all;max-width:480px}
+.tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+.t-securly{background:#fde2e4;color:#8a1c2b}.t-dns{background:#fef0c7;color:#93370d}.t-proxy{background:#fce7f6;color:#851651}
+.t-tls{background:#e0eaff;color:#1d3a8a}.t-ext{background:#fde2e4;color:#8a1c2b}.t-http{background:#f2f4f7;color:#344054}.t-other{background:#f2f4f7;color:#344054}
+.wrap{overflow-x:auto}
+.controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:8px 0}
+input[type=search]{font:inherit;padding:5px 10px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);min-width:220px}
+.mute{color:var(--mute)}
+details summary{cursor:pointer;font-weight:600}
+pre{background:var(--chip);padding:10px;border-radius:6px;overflow-x:auto;font-size:13px}
+.err{color:var(--bad);font-weight:600}
+</style>
+</head>
+<body>
+<main>
+<h1>RJ Network Check</h1>
+<p class="sub">Find out exactly what got blocked on a student laptop, and why. Everything runs on this computer. The log file is never uploaded anywhere.</p>
+
+<div class="card">
+<h2>1 · Record</h2>
+<ol>
+<li>Open a new Edge tab and go to <code>edge://net-export</code> <button id="copyBtn">Copy</button> <span class="mute">(Edge won't let a page link there, so paste it into the address bar.)</span></li>
+<li>Pick <b>Strip private information</b>, then click <b>Start Logging to Disk</b> and save the file (Downloads is fine).</li>
+<li>In another tab, do the thing that's broken: load the site, open the assignment, click the button.</li>
+<li>Go back to the net-export tab and click <b>Stop Logging</b>.</li>
+</ol>
+</div>
+
+<div class="card">
+<h2>2 · Check</h2>
+<div id="drop">Drop the <b>.json</b> log here, or click to choose it</div>
+<input type="file" id="file" accept=".json,application/json" hidden>
+<p id="status" class="mute" style="margin:8px 0 0"></p>
+</div>
+
+<div id="results" hidden>
+<div class="card">
+<h2>Summary</h2>
+<div class="stats" id="stats"></div>
+</div>
+<div class="card">
+<h2>Domains to look at</h2>
+<p class="mute" style="margin-top:-4px">Remember: a reliable allow needs the DNS Allow List, Allowed Destinations, and the extension. Subdomains need their own entries.</p>
+<div class="wrap"><table id="domains"></table></div>
+</div>
+<div class="card">
+<h2>Requests</h2>
+<div class="controls">
+<input type="search" id="q" placeholder="Filter by URL or reason">
+<label><input type="checkbox" id="showAll"> Show successful requests too</label>
+<button id="csvBtn">Download CSV</button>
+</div>
+<div class="wrap"><table id="reqs"></table></div>
+</div>
+</div>
+
+<div class="card">
+<details>
+<summary>IT fallback: Windows packet capture (needs admin)</summary>
+<p>Use this for non-browser traffic, or when <code>edge://net-export</code> is blocked. Run it in an elevated PowerShell on the laptop. You'll only see DNS lookups, server names, and resets, not full URLs, because the traffic is HTTPS.</p>
+<pre>pktmon start --capture --pkt-size 0 -f C:\Temp\capture.etl
+# reproduce the problem, then:
+pktmon stop
+pktmon etl2pcap C:\Temp\capture.etl -o C:\Temp\capture.pcapng</pre>
+<p>Open <code>capture.pcapng</code> in Wireshark on a staff machine. Useful filters: <code>dns</code>, <code>tls.handshake.extensions_server_name</code>, <code>tcp.flags.reset==1</code>.</p>
+</details>
+</div>
+</main>
+
+<script>
+/* ===ANALYZER=== */
+const FALLBACK_ERRORS={"-2":"ERR_FAILED","-3":"ERR_ABORTED","-7":"ERR_TIMED_OUT","-20":"ERR_BLOCKED_BY_CLIENT","-21":"ERR_NETWORK_CHANGED","-22":"ERR_BLOCKED_BY_ADMINISTRATOR","-27":"ERR_BLOCKED_BY_RESPONSE","-100":"ERR_CONNECTION_CLOSED","-101":"ERR_CONNECTION_RESET","-102":"ERR_CONNECTION_REFUSED","-105":"ERR_NAME_NOT_RESOLVED","-106":"ERR_INTERNET_DISCONNECTED","-107":"ERR_SSL_PROTOCOL_ERROR","-111":"ERR_TUNNEL_CONNECTION_FAILED","-118":"ERR_CONNECTION_TIMED_OUT","-130":"ERR_PROXY_CONNECTION_FAILED","-137":"ERR_NAME_RESOLUTION_FAILED","-200":"ERR_CERT_COMMON_NAME_INVALID","-201":"ERR_CERT_DATE_INVALID","-202":"ERR_CERT_AUTHORITY_INVALID"};
+
+function parseLog(text){
+  try{return JSON.parse(text);}catch(e){}
+  // Logs cut off before "Stop Logging" are missing their closing brackets.
+  let t=text.trimEnd().replace(/,\s*$/,"");
+  for(const tail of ["]}","}]}","\"}]}"]){try{return JSON.parse(t+tail);}catch(e){}}
+  // Last resort: drop the final partial event.
+  let cut=t.length;
+  for(let i=0;i<200;i++){
+    cut=t.lastIndexOf("},",cut-1);if(cut<=0)break;
+    try{return JSON.parse(t.slice(0,cut+1)+"]}");}catch(e){}
+  }
+  throw new Error("This doesn't look like an Edge net-export log.");
+}
+
+function b64try(s){
+  if(!s||s.length<8||!/^[A-Za-z0-9+/_=-]+$/.test(s))return null;
+  try{const d=atob(s.replace(/-/g,"+").replace(/_/g,"/"));return /^[\x20-\x7e]+$/.test(d)?d:null;}catch(e){return null;}
+}
+
+function securlyInfo(url){
+  let u;try{u=new URL(url);}catch(e){return null;}
+  if(!/(^|\.)securly\.com$/i.test(u.hostname))return null;
+  if(!/block/i.test(u.pathname+u.search))return null;
+  const info={};
+  for(const [k,v] of u.searchParams){info[k]=v;const d=b64try(v);if(d)info[k+" (decoded)"]=d;}
+  return info;
+}
+
+function classify(r){
+  const e=r.errorName||"";
+  if(r.securly)return ["securly","Securly block page"];
+  if(e==="ERR_BLOCKED_BY_CLIENT")return ["ext","Blocked by an extension (likely Securly)"];
+  if(e==="ERR_BLOCKED_BY_ADMINISTRATOR")return ["ext","Blocked by Edge policy (URLBlocklist)"];
+  if(/NAME_NOT_RESOLVED|NAME_RESOLUTION_FAILED/.test(e))return ["dns","DNS didn't resolve (DNS block?)"];
+  if(/PROXY|TUNNEL/.test(e))return ["proxy","Proxy refused it (SmartPAC)"];
+  if(/CERT_|SSL_/.test(e))return ["tls","TLS / certificate failure"];
+  if(/CONNECTION_RESET|CONNECTION_CLOSED|CONNECTION_REFUSED/.test(e))return ["tls","Connection reset or refused"];
+  if(/TIMED_OUT/.test(e))return ["other","Timed out"];
+  if(e&&e!=="ERR_ABORTED")return ["other",e];
+  if(r.status>=400)return ["http","HTTP "+r.status];
+  return null;
+}
+
+function analyze(text){
+  const log=parseLog(text);
+  const c=log.constants||{};
+  const evName={};for(const k in (c.logEventTypes||{}))evName[c.logEventTypes[k]]=k;
+  const srcName={};for(const k in (c.logSourceType||{}))srcName[c.logSourceType[k]]=k;
+  const errName=Object.assign({},FALLBACK_ERRORS);for(const k in (c.netError||{}))errName[c.netError[k]]=k.startsWith("ERR_")?k:"ERR_"+k;
+  const tick=Number(c.timeTickOffset||0);
+  const reqs=new Map(), dnsFails=[];
+  for(const ev of (log.events||[])){
+    const src=ev.source||{}, type=evName[ev.type]||String(ev.type), st=srcName[src.type]||"";
+    const p=ev.params||{}, time=tick+Number(ev.time||0);
+    if(st==="URL_REQUEST"){
+      let r=reqs.get(src.id);
+      if(!r){r={id:src.id,time,url:"",method:"",status:0,redirects:[],proxy:"",error:0};reqs.set(src.id,r);}
+      if(p.url&&!r.url){r.url=p.url;r.method=p.method||"";}
+      if(type==="URL_REQUEST_REDIRECTED"&&p.location)r.redirects.push(p.location);
+      if(/READ_RESPONSE_HEADERS/.test(type)&&p.headers){
+        const first=Array.isArray(p.headers)?p.headers[0]:(p.headers.status||"");
+        const m=/\s(\d{3})\b/.exec(" "+first);if(m)r.status=Number(m[1]);
+        if(Array.isArray(p.headers))for(const h of p.headers){const lm=/^location:\s*(.+)$/i.exec(h);if(lm&&!r.redirects.includes(lm[1]))r.redirects.push(lm[1]);}
+      }
+      if(/PROXY/.test(type)&&(p.pac_string||p.proxy_info))r.proxy=p.pac_string||p.proxy_info;
+      if(typeof p.net_error==="number"&&p.net_error!==0)r.error=p.net_error;
+    } else if(/HOST_RESOLVER/.test(st)||/HOST_RESOLVER/.test(type)){
+      if(p.host&&!src._h){src._h=1;}
+      if(typeof p.net_error==="number"&&p.net_error!==0)dnsFails.push({id:src.id,time,net_error:p.net_error});
+    }
+  }
+  const out=[];
+  for(const r of reqs.values()){
+    if(!r.url||/^(data|blob|chrome|edge|chrome-extension|extension):/i.test(r.url))continue;
+    r.errorName=r.error?(errName[r.error]||String(r.error)):"";
+    const blockUrl=[r.url,...r.redirects].find(u=>securlyInfo(u));
+    r.securly=blockUrl?securlyInfo(blockUrl):null;
+    r.blockUrl=blockUrl||"";
+    let host="";try{host=new URL(r.url).hostname;}catch(e){}
+    r.host=host;
+    const cls=classify(r);
+    r.kind=cls?cls[0]:"ok";r.reason=cls?cls[1]:(r.errorName==="ERR_ABORTED"?"Cancelled (normal)":"OK");
+    out.push(r);
+  }
+  out.sort((a,b)=>a.time-b.time);
+  return {requests:out,dnsFailures:dnsFails.length};
+}
+/* ===END ANALYZER=== */
+
+if(typeof document!=="undefined"){
+  const $=id=>document.getElementById(id);
+  let data=null;
+  $("copyBtn").onclick=()=>{navigator.clipboard&&navigator.clipboard.writeText("edge://net-export");$("copyBtn").textContent="Copied";setTimeout(()=>$("copyBtn").textContent="Copy",1500);};
+  const drop=$("drop"),file=$("file");
+  drop.onclick=()=>file.click();
+  drop.ondragover=e=>{e.preventDefault();drop.classList.add("over");};
+  drop.ondragleave=()=>drop.classList.remove("over");
+  drop.ondrop=e=>{e.preventDefault();drop.classList.remove("over");if(e.dataTransfer.files[0])load(e.dataTransfer.files[0]);};
+  file.onchange=()=>{if(file.files[0])load(file.files[0]);};
+  function load(f){
+    $("status").className="mute";$("status").textContent="Reading "+f.name+"…";
+    f.text().then(t=>{
+      try{data=analyze(t);}catch(e){$("status").className="err";$("status").textContent=e.message;return;}
+      $("status").textContent=f.name+" · "+data.requests.length+" requests";
+      render();
+    });
+  }
+  const esc=s=>String(s).replace(/[&<>"]/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[ch]));
+  const fmt=t=>t?new Date(t).toLocaleTimeString():"";
+  function render(){
+    $("results").hidden=false;
+    const bad=data.requests.filter(r=>r.kind!=="ok");
+    const count=k=>bad.filter(r=>r.kind===k).length;
+    $("stats").innerHTML=[["Requests",data.requests.length],["Problems",bad.length],["Securly",count("securly")+count("ext")],["DNS",count("dns")],["Proxy",count("proxy")],["TLS / reset",count("tls")]].map(([l,n])=>`<div class="stat"><b>${n}</b>${l}</div>`).join("");
+    const byHost={};for(const r of bad){const h=byHost[r.host]=byHost[r.host]||{n:0,reasons:new Set()};h.n++;h.reasons.add(r.reason);}
+    const hosts=Object.entries(byHost).sort((a,b)=>b[1].n-a[1].n);
+    $("domains").innerHTML=hosts.length?"<tr><th>Domain</th><th>Failures</th><th>Why</th></tr>"+hosts.map(([h,v])=>`<tr><td>${esc(h)}</td><td>${v.n}</td><td>${esc([...v.reasons].join(", "))}</td></tr>`).join(""):"<tr><td>Nothing blocked or failed in this log. If the problem happened, make sure you reproduced it while logging was on.</td></tr>";
+    renderReqs();
+  }
+  function renderReqs(){
+    const q=$("q").value.toLowerCase(),all=$("showAll").checked;
+    const rows=data.requests.filter(r=>(all||r.kind!=="ok")&&(!q||(r.url+" "+r.reason).toLowerCase().includes(q)));
+    $("reqs").innerHTML="<tr><th>Time</th><th>Result</th><th>URL</th><th>Details</th></tr>"+rows.slice(0,2000).map(r=>{
+      const det=[];
+      if(r.errorName)det.push(esc(r.errorName));
+      if(r.status)det.push("HTTP "+r.status);
+      if(r.proxy)det.push("via "+esc(r.proxy));
+      if(r.securly)det.push(Object.entries(r.securly).map(([k,v])=>`<b>${esc(k)}</b>: ${esc(v)}`).join("<br>"));
+      return `<tr><td>${fmt(r.time)}</td><td><span class="tag t-${r.kind==="ok"?"other":r.kind}">${esc(r.reason)}</span></td><td class="url">${esc(r.url)}</td><td>${det.join("<br>")}</td></tr>`;
+    }).join("")+(rows.length>2000?`<tr><td colspan=4 class="mute">Showing first 2000 of ${rows.length}. Use the filter.</td></tr>`:"");
+  }
+  $("q").oninput=renderReqs;$("showAll").onchange=renderReqs;
+  $("csvBtn").onclick=()=>{
+    const q=s=>'"'+String(s??"").replace(/"/g,'""')+'"';
+    const lines=[["time","result","host","url","error","status","proxy","securly_block_url"].join(",")];
+    for(const r of data.requests.filter(r=>r.kind!=="ok"))lines.push([new Date(r.time).toISOString(),r.reason,r.host,r.url,r.errorName,r.status||"",r.proxy,r.blockUrl].map(q).join(","));
+    const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([lines.join("\n")],{type:"text/csv"}));a.download="blocked-requests.csv";a.click();
+  };
+}
+if(typeof module!=="undefined")module.exports={analyze};
+</script>
+</body>
+</html>
